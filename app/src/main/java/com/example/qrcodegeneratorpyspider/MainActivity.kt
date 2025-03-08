@@ -39,6 +39,8 @@ import androidx.lifecycle.LifecycleEventObserver
 import java.text.SimpleDateFormat
 import java.util.*
 import android.graphics.Bitmap as AndroidBitmap
+import androidx.core.content.edit
+import androidx.lifecycle.compose.LocalLifecycleOwner
 
 // Enum representing the two screens.
 enum class Screen {
@@ -72,7 +74,7 @@ fun AppContent() {
                 initialText = qrText ?: "",
                 onSave = { newText ->
                     qrText = newText
-                    sharedPref.edit().putString("qrText", newText).apply()
+                    sharedPref.edit() { putString("qrText", newText) }
                     currentScreen = Screen.QR
                 }
             )
@@ -130,8 +132,8 @@ fun InputScreen(initialText: String, onSave: (String) -> Unit) {
 @Composable
 fun QRScreen(qrText: String, onChangeText: () -> Unit) {
     // State to force refresh when the app resumes.
-    var refreshTrigger by remember { mutableStateOf(System.currentTimeMillis()) }
-    val lifecycleOwner = LocalLifecycleOwner.current
+    var refreshTrigger by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
