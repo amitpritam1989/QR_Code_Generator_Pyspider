@@ -5,6 +5,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardOptions
@@ -24,6 +25,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.tooling.preview.Preview
@@ -31,11 +34,13 @@ import com.example.qrcodegeneratorpyspider.ui.theme.QRCodeGeneratorPyspiderTheme
 import com.google.zxing.BarcodeFormat
 import com.journeyapps.barcodescanner.BarcodeEncoder
 import kotlinx.coroutines.launch
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import java.text.SimpleDateFormat
 import java.util.*
 import android.graphics.Bitmap as AndroidBitmap
 
-// Enum to represent which screen to show.
+// Enum representing the two screens.
 enum class Screen {
     Input, QR
 }
@@ -55,11 +60,10 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun AppContent() {
     val context = LocalContext.current
-    // Use SharedPreferences to persist the QR text.
+    // Retrieve SharedPreferences for persisting the QR text.
     val sharedPref = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
-    // Initially, try to read the saved text. If none is found, it will be null.
     var qrText by remember { mutableStateOf(sharedPref.getString("qrText", null)) }
-    // Determine the current screen: if no text, show the Input screen; otherwise show the QR screen.
+    // Show the input screen if no QR text is saved; otherwise show the QR screen.
     var currentScreen by remember { mutableStateOf(if (qrText == null) Screen.Input else Screen.QR) }
 
     when (currentScreen) {
@@ -125,34 +129,53 @@ fun InputScreen(initialText: String, onSave: (String) -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QRScreen(qrText: String, onChangeText: () -> Unit) {
-    // Use a drawer state for the hamburger menu.
+    // State to force refresh when the app resumes.
+    var refreshTrigger by remember { mutableStateOf(System.currentTimeMillis()) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                refreshTrigger = System.currentTimeMillis()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+    // Drawer state for the hamburger menu.
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+    var showAboutDialog by remember { mutableStateOf(false) }
+    val uriHandler = LocalUriHandler.current
+    // Format current date.
+    val currentDate = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+    // Regenerate the QR code (the recomposition is forced by refreshTrigger state change).
+    val qrBitmap = generateQRCode(qrText)
 
     ModalNavigationDrawer(
         drawerContent = {
             ModalDrawerSheet {
-                // Add a drawer item to allow changing the QR text.
                 NavigationDrawerItem(
                     label = { Text("Change QR Text") },
                     selected = false,
                     onClick = { onChangeText() },
                     modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                 )
+                NavigationDrawerItem(
+                    label = { Text("About") },
+                    selected = false,
+                    onClick = { showAboutDialog = true },
+                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                )
             }
         },
         drawerState = drawerState
-    )
-
-
-
-    {
-
+    ) {
         Scaffold(
             topBar = {
-
                 TopAppBar(
-                    title = { Text("Amit Pritam Pati") },
+                    title = { Text("QRC Generator PySpider") },
                     navigationIcon = {
                         IconButton(onClick = { scope.launch { drawerState.open() } }) {
                             Icon(Icons.Default.Menu, contentDescription = "Menu")
@@ -161,8 +184,6 @@ fun QRScreen(qrText: String, onChangeText: () -> Unit) {
                 )
             }
         ) { innerPadding ->
-            // Generate the QR code based on the stored text and current date.
-            val qrBitmap = generateQRCode(qrText)
             Column(
                 modifier = Modifier
                     .padding(innerPadding)
@@ -176,11 +197,48 @@ fun QRScreen(qrText: String, onChangeText: () -> Unit) {
                         contentDescription = "QR Code",
                         modifier = Modifier.size(300.dp)
                     )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    // Display the current date below the QR code.
+                    Text(text = "Date: $currentDate", style = MaterialTheme.typography.bodyLarge)
                 } else {
                     Text("Error generating QR Code")
                 }
             }
         }
+    }
+
+    // About dialog showing clickable text.
+    if (showAboutDialog) {
+        AlertDialog(
+            onDismissRequest = { showAboutDialog = false },
+            title = { Text("About") },
+            text = {
+                Column {
+                    Text("Creator: Amit Pritam")
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Instagram - @amit.pritam",
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.clickable {
+                            uriHandler.openUri("https://www.instagram.com/amit.pritam/")
+                        }
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Github - amitpritam1989",
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.clickable {
+                            uriHandler.openUri("https://github.com/amitpritam1989")
+                        }
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showAboutDialog = false }) {
+                    Text("Close")
+                }
+            }
+        )
     }
 }
 
@@ -188,11 +246,11 @@ fun generateQRCode(userText: String): ImageBitmap? {
     return try {
         // Format the current date as yyyy-MM-dd.
         val currentDate = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-        // Create the text to encode in the QR code.
-        val qrText = "$userText/$currentDate/student"
+        // Build the QR content string.
+        val qrContent = "$userText/$currentDate/student"
         val barcodeEncoder = BarcodeEncoder()
         // Generate a 1080x1080 QR code bitmap.
-        val bitmap: AndroidBitmap = barcodeEncoder.encodeBitmap(qrText, BarcodeFormat.QR_CODE, 1080, 1080)
+        val bitmap: AndroidBitmap = barcodeEncoder.encodeBitmap(qrContent, BarcodeFormat.QR_CODE, 1080, 1080)
         bitmap.asImageBitmap()
     } catch (e: Exception) {
         e.printStackTrace()
@@ -204,7 +262,6 @@ fun generateQRCode(userText: String): ImageBitmap? {
 @Composable
 fun DefaultPreview() {
     QRCodeGeneratorPyspiderTheme {
-        // For preview, we simulate the QR screen with a sample text.
         QRScreen(qrText = "1224195", onChangeText = {})
     }
 }
